@@ -427,7 +427,7 @@ private fun HomeScreen(
         ) {
             Column {
                 Text(
-                    text = "Gami",
+                    text = "Gami1",
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
