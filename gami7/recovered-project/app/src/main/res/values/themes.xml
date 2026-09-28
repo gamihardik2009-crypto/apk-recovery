@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The original APK used a theme with no ActionBar and followed the system
+      DayNight setting (Compose drives all actual colours, so the platform theme
+      only needs to provide a sane window background / no action bar).
+
+      RECOVERED FIX: the parent MUST be a NoActionBar theme.  `Theme.DeviceDefault`
+      draws a platform ActionBar showing the app label ("Gami"), which wasted a
+      whole strip of screen space above the Compose UI.
+    -->
+    <style name="Theme.BulkSmsScheduler" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+</resources>

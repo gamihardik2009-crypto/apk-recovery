@@ -1,0 +1,23 @@
+# Gradle & Kotlin
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# Tools & Analysis
+_tools/
+gami7/analysis/
+gami7/apktool/
+
+# Android / Local
+local.properties
+*.apk
+*.log
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

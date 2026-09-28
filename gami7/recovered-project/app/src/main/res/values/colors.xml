@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Window background = the Compose screens' dark background (#181C24, see
+      AppContainer.darkBg).  The status bar is transparent, so this colour is what
+      shows behind it - a light window background would leave a bright strip above
+      the dark Compose UI.
+    -->
+    <color name="window_background">#FF181C24</color>
+    <color name="ic_launcher_background">#FF1B5E20</color>
+</resources>

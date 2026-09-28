@@ -1,0 +1,25 @@
+# ---- Gradle / Kotlin build output ----
+/.gradle/
+/.kotlin/
+build/
+app/build/
+out/
+
+# ---- Android ----
+*.apk
+*.ap_
+*.log
+/android/android-config.json
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# ---- Machine-specific (points at your local Android SDK path) ----
+local.properties
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db

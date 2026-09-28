@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NOTE: this is deliberately minimal.  In the ORIGINAL app this file contained
+  only library strings + "app_name" - every user visible string of the app was
+  hard coded in the Compose UI (recovered from the DEX string pool).  We keep
+  that structure so the recovered text lives next to the screen that shows it
+  (see ui/RecoveredStrings.kt).
+-->
+<resources>
+    <string name="app_name">Gami</string>
+</resources>
