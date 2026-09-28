@@ -54,6 +54,11 @@ class SmsRepository(
     val recentSchedulesFlow: Flow<List<ScheduleWithClient>> =
         scheduleDao.observeRecentSchedulesWithClient()
 
+    val recentActivityPastWeekFlow: Flow<List<ScheduleWithClient>> = flow {
+        val sevenDaysAgo = LocalDate.now().minusDays(7).toString()
+        emitAll(scheduleDao.observeRecentSchedulesPastWeek(sevenDaysAgo))
+    }
+
     val settingsFlow: Flow<AppSettings?> = settingsDao.observeSettings()
 
     /** Dashboard counters. */

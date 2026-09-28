@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -74,6 +75,7 @@ import com.example.bulksmsscheduler.SmsApplication
 import com.example.bulksmsscheduler.model.AppSettings
 import com.example.bulksmsscheduler.model.Client
 import com.example.bulksmsscheduler.model.HomeStatsData
+import com.example.bulksmsscheduler.model.ScheduleStatus
 import com.example.bulksmsscheduler.model.ScheduleWithClient
 import com.example.bulksmsscheduler.utils.SchedulePlanner
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
@@ -139,6 +141,7 @@ fun AppContainer(application: SmsApplication) {
     val clientsState by repository.clientsFlow.collectAsState(initial = emptyList())
     val templatesState by repository.templatesFlow.collectAsState(initial = emptyList())
     val schedulesState by repository.schedulesFlow.collectAsState(initial = emptyList())
+    val recentActivityState by repository.recentActivityPastWeekFlow.collectAsState(initial = emptyList())
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -205,6 +208,7 @@ fun AppContainer(application: SmsApplication) {
                     stats = stats,
                     clientCount = clientsState.size,
                     clients = clientsState,
+                    recentActivity = recentActivityState,
                     cardBg = cardBg,
                     engineCardBg = engineCardBg,
                     engineSubcardBg = engineSubcardBg,
@@ -391,6 +395,7 @@ private fun HomeScreen(
     stats: HomeStatsData,
     clientCount: Int,
     clients: List<Client> = emptyList(),
+    recentActivity: List<ScheduleWithClient>,
     cardBg: Color,
     engineCardBg: Color,
     engineSubcardBg: Color,
@@ -724,6 +729,132 @@ private fun HomeScreen(
                 color = Color(0xFFE57373),
                 modifier = Modifier.weight(1f),
                 onClick = onShowFailedHistory
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 4. Recent Activity Section (Last 1 Week)
+        Text(
+            text = "Recent Activity (Last 7 Days)",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = textPrimary
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (recentActivity.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBg)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No SMS activity in the last 7 days",
+                        fontSize = 14.sp,
+                        color = textSecondary
+                    )
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                recentActivity.forEach { item ->
+                    RecentActivityCard(
+                        item = item,
+                        cardBg = cardBg,
+                        textPrimary = textPrimary,
+                        textSecondary = textSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentActivityCard(
+    item: ScheduleWithClient,
+    cardBg: Color,
+    textPrimary: Color,
+    textSecondary: Color
+) {
+    val isSent = item.schedule.status == ScheduleStatus.SENT
+    val statusColor = if (isSent) Color(0xFF81C784) else Color(0xFFE57373)
+    val statusText = if (isSent) "SENT" else "FAILED"
+    val dateDisplay = "${item.schedule.scheduledDate} ${item.schedule.scheduledTime}"
+    val clientName = item.client?.name ?: "Unknown Client"
+    val clientPhone = item.client?.phone?.let { "($it)" } ?: ""
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = clientName,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary
+                    )
+                    if (clientPhone.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = clientPhone,
+                            fontSize = 12.sp,
+                            color = textSecondary
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(statusColor.copy(alpha = 0.18f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = statusText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = item.schedule.message,
+                fontSize = 13.sp,
+                color = Color(0xFFD0D0D0),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = dateDisplay,
+                fontSize = 11.sp,
+                color = textSecondary
             )
         }
     }

@@ -94,6 +94,20 @@ interface ScheduleDao {
     )
     fun observeRecentSchedulesWithClient(): Flow<List<ScheduleWithClient>>
 
+    /** Recent activity list (SENT or FAILED) from the past week (>= sinceDate). */
+    @Transaction
+    @Suppress(RoomWarnings.QUERY_MISMATCH)
+    @RewriteQueriesToDropUnusedColumns
+    @Query(
+        """
+        SELECT * FROM schedules 
+        INNER JOIN clients ON schedules.clientId = clients.id
+        WHERE status IN ('SENT', 'FAILED') AND scheduledDate >= :sinceDate
+        ORDER BY scheduledDate DESC, scheduledTime DESC
+    """,
+    )
+    fun observeRecentSchedulesPastWeek(sinceDate: String): Flow<List<ScheduleWithClient>>
+
     /** RECOVERED: scheduled-message search (query text + optional status filter). */
     @Transaction
     @Suppress(RoomWarnings.QUERY_MISMATCH)

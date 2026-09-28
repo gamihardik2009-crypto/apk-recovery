@@ -2,6 +2,7 @@ package com.example.bulksmsscheduler.utils
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.content.FileProvider
 import com.example.bulksmsscheduler.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,7 @@ import java.net.URL
 
 object GithubAutoUpdater {
 
+    private const val TAG = "GithubAutoUpdater"
     private const val GITHUB_API_URL = "https://api.github.com/repos/gamihardik2009-crypto/apk-recovery/releases/latest"
     private const val APK_DOWNLOAD_URL = "https://github.com/gamihardik2009-crypto/apk-recovery/releases/latest/download/gami.apk"
 
@@ -26,22 +28,27 @@ object GithubAutoUpdater {
             val url = URL(GITHUB_API_URL)
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
+                setRequestProperty("User-Agent", "BulkSmsScheduler-AndroidApp")
                 setRequestProperty("Accept", "application/vnd.github.v3+json")
                 connectTimeout = 5000
                 readTimeout = 5000
+                instanceFollowRedirects = true
             }
+            Log.d(TAG, "Response code: ${connection.responseCode}")
             if (connection.responseCode == 200) {
                 val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                Log.d(TAG, "Response: $responseText")
                 val json = JSONObject(responseText)
                 val tagName = json.optString("tag_name", "").removePrefix("v").trim()
                 val currentVersion = BuildConfig.VERSION_NAME.removePrefix("v").trim()
+                Log.d(TAG, "Remote tag: $tagName, Local version: $currentVersion")
 
                 if (tagName.isNotEmpty() && isNewerVersion(tagName, currentVersion)) {
                     return@withContext UpdateInfo(versionName = tagName, apkUrl = APK_DOWNLOAD_URL)
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error checking update", e)
         }
         return@withContext null
     }
