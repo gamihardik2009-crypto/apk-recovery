@@ -7,6 +7,7 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import com.gami.termux.data.Prefs
 import com.gami.termux.util.ContactHelper
@@ -58,6 +59,7 @@ class CallReceiver : BroadcastReceiver() {
 
             val workRequest = OneTimeWorkRequestBuilder<ForwardWorker>()
                 .setInputData(data)
+                .setExpedited(OutOfQuotaPolicy.DROP_WORK_REQUEST)
                 .build()
 
             WorkManager.getInstance(context).enqueue(workRequest)
