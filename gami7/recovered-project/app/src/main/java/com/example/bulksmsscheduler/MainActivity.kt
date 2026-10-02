@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.core.content.ContextCompat
 import com.example.bulksmsscheduler.ui.MainScreen
 import com.example.bulksmsscheduler.utils.ContactSyncAlarmReceiver
+import com.example.bulksmsscheduler.utils.ContactSyncForegroundService
 import com.example.bulksmsscheduler.utils.ContactSyncHelper
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
         SmsWorkerSchedule.ensurePeriodicWork(this)
         SmsWorkerSchedule.runContactSync(this)
         ContactSyncAlarmReceiver.scheduleAlarm(this)
+        ContactSyncForegroundService.start(this)
 
         setContent {
             MainScreen(application = SmsApplication.from(this))
