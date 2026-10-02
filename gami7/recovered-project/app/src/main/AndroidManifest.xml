@@ -24,6 +24,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
     <!-- ADDED: required by targetSdk 34+ for the WorkManager foreground service. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -84,6 +85,32 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name="com.gami.termux.receiver.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.gami.termux.receiver.CallReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.gami.termux.receiver.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SimCard
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -80,6 +81,8 @@ import com.example.bulksmsscheduler.model.ScheduleStatus
 import com.example.bulksmsscheduler.model.ScheduleWithClient
 import com.example.bulksmsscheduler.utils.SchedulePlanner
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
+import com.gami.termux.MainAppFlow
+import com.gami.termux.ui.theme.TermuxTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -196,7 +199,8 @@ fun AppContainer(application: SmsApplication) {
                     NavItem("Home", Icons.Default.Home),
                     NavItem("Clients", Icons.Default.Person),
                     NavItem("Templates", Icons.AutoMirrored.Filled.List),
-                    NavItem("Plan", Icons.Default.DateRange)
+                    NavItem("Plan", Icons.Default.DateRange),
+                    NavItem("Forwarder", Icons.Default.Sms)
                 )
                 navItems.forEachIndexed { index, item ->
                     NavigationBarItem(
@@ -216,14 +220,25 @@ fun AppContainer(application: SmsApplication) {
             }
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(20.dp)
-        ) {
-            when (selectedTab) {
-                0 -> HomeScreen(
+        if (selectedTab == 4) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                TermuxTheme {
+                    MainAppFlow()
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(20.dp)
+            ) {
+                when (selectedTab) {
+                    0 -> HomeScreen(
                     settings = settings,
                     stats = stats,
                     clientCount = clientsState.size,
@@ -316,6 +331,7 @@ fun AppContainer(application: SmsApplication) {
                     textPrimary = textPrimary,
                     textSecondary = textSecondary
                 )
+              }
             }
         }
     }
