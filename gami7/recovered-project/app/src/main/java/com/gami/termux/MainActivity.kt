@@ -318,6 +318,11 @@ fun DashboardScreen(
             )
         }
     ) { innerPadding ->
+        val hasSmsPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+        val hasPhonePerm = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val hasCallLogPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val allPermissionsGranted = hasSmsPerm && hasPhonePerm && hasCallLogPerm
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -325,6 +330,30 @@ fun DashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (!allPermissionsGranted) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF5C2426)),
+                    border = BorderStroke(1.dp, Color(0xFF7A2E30))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⚠️ Permissions Required", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("SMS and Call Forwarding require SMS, Phone State, and Call Log permissions to work.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE0E0E0))
+                        Button(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                        ) {
+                            Text("Grant Permissions in Settings", color = Color.White)
+                        }
+                    }
+                }
+            }
+
             // Controls Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
