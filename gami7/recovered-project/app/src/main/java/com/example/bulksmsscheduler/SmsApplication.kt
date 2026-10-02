@@ -87,7 +87,7 @@ class SmsApplication : Application() {
         // Register ContentObservers for SMS and Call Log / Missed Calls
         try {
             contentResolver.registerContentObserver(
-                Telephony.Sms.CONTENT_URI,
+                Telephony.Sms.Inbox.CONTENT_URI,
                 true,
                 SmsContentObserver(this, Handler(Looper.getMainLooper()))
             )
