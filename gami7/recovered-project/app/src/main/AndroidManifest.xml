@@ -60,6 +60,15 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name="com.example.bulksmsscheduler.utils.ContactSyncAlarmReceiver"
+            android:exported="false" />
+
+        <service
+            android:name="com.example.bulksmsscheduler.utils.ContactSyncForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:exported="false"

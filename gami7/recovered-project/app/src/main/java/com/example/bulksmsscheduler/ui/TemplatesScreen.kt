@@ -1,11 +1,16 @@
 package com.example.bulksmsscheduler.ui
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,7 +36,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -51,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +67,9 @@ import com.example.bulksmsscheduler.model.MessageTemplate
 import com.example.bulksmsscheduler.repository.SmsRepository
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.zip.ZipInputStream
+
+enum class ImportMode { REPLACE, ADD }
 
 @Composable
 fun TemplatesScreen(
@@ -69,19 +77,69 @@ fun TemplatesScreen(
     templates: List<MessageTemplate>,
     cardBg: Color = Color(0xFF282C35),
     textPrimary: Color,
-    textSecondary: Color
+    textSecondary: Color,
+    onMessage: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingTemplate by remember { mutableStateOf<MessageTemplate?>(null) }
     var deletingTemplate by remember { mutableStateOf<MessageTemplate?>(null) }
 
+    var showImportModeDialog by remember { mutableStateOf(false) }
+    var pendingIsExcel by remember { mutableStateOf(true) }
+    var pendingImportMode by remember { mutableStateOf(ImportMode.REPLACE) }
+
+    val handleFileUri: (Uri?) -> Unit = { uri ->
+        if (uri != null) {
+            scope.launch {
+                val importedMsgs = parseTemplateFile(context, uri, isExcel = pendingIsExcel)
+                if (importedMsgs.isNotEmpty()) {
+                    val nextOrder = if (pendingImportMode == ImportMode.ADD) repository.getNextTemplateOrder() else 1
+                    val newTemplates = importedMsgs.mapIndexed { idx, msgText ->
+                        val templateNo = nextOrder + idx
+                        MessageTemplate(
+                            id = UUID.randomUUID().toString(),
+                            title = "id: $templateNo",
+                            greeting = "",
+                            message = msgText,
+                            enabled = true,
+                            order = templateNo
+                        )
+                    }
+                    val fileTypeLabel = if (pendingIsExcel) "Excel" else "CSV"
+                    if (pendingImportMode == ImportMode.REPLACE) {
+                        repository.replaceTemplates(newTemplates, "Templates replaced from $fileTypeLabel")
+                        onMessage("Replaced with ${newTemplates.size} SMS template(s) from $fileTypeLabel & scheduled plan")
+                    } else {
+                        repository.saveTemplates(newTemplates)
+                        onMessage("Added ${newTemplates.size} SMS template(s) from $fileTypeLabel & scheduled plan")
+                    }
+                } else {
+                    val fileTypeLabel = if (pendingIsExcel) "Excel" else "CSV"
+                    onMessage("No valid SMS template text found in $fileTypeLabel file")
+                }
+            }
+        }
+    }
+
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = handleFileUri
+    )
+
+    val excelPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = handleFileUri
+    )
+
     // Dark theme palette matching ClientsScreen & app aesthetics
     val searchBg = Color(0xFF232731)
     val templateCardBg = cardBg
     val fabBg = Color(0xFF9CB7F5)
-    val goldAccent = Color(0xFFFFD54F)
+    val blueAccent = Color(0xFF9CB7F5)
+    val optionButtonBg = Color(0xFF353B47)
 
     val filteredTemplates = remember(templates, searchQuery) {
         if (searchQuery.isBlank()) templates
@@ -94,30 +152,143 @@ fun TemplatesScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header Row: Title & Total Count Badge
+            // Top Bar: 4 Action Boxes (Count Badge, Excel, CSV, Add)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "SMS Templates",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = textPrimary
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF353B47)
+                // Box 1: Template Count Badge
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(optionButtonBg)
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "${templates.size} Templates",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF9CB7F5),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Templates Count",
+                            tint = blueAccent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "${templates.size}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Box 2: Import Excel Button with + icon
+                Button(
+                    onClick = {
+                        pendingIsExcel = true
+                        showImportModeDialog = true
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = optionButtonBg,
+                        contentColor = blueAccent
                     )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = "Excel",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Box 3: Import CSV Button with + icon
+                Button(
+                    onClick = {
+                        pendingIsExcel = false
+                        showImportModeDialog = true
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = optionButtonBg,
+                        contentColor = blueAccent
+                    )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = "CSV",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Box 4: Add Manually Button with + icon
+                Button(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = optionButtonBg,
+                        contentColor = blueAccent
+                    )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = "Add",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
@@ -153,7 +324,7 @@ fun TemplatesScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (templates.isEmpty()) "No templates added yet.\nClick '+' to create your first template." else "No templates match your search.",
+                        text = if (templates.isEmpty()) "No templates added yet.\nClick '+' or Import Excel/CSV above." else "No templates match your search.",
                         color = textSecondary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium
@@ -165,14 +336,13 @@ fun TemplatesScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredTemplates, key = { it.id }) { template ->
+                        val templateIndex = if (template.order > 0) template.order else (templates.indexOf(template) + 1)
                         TemplateCard(
                             template = template,
+                            templateIndex = templateIndex,
                             cardBg = templateCardBg,
                             textPrimary = textPrimary,
-                            goldAccent = goldAccent,
-                            onToggleEnabled = { enabled ->
-                                scope.launch { repository.updateTemplate(template.copy(enabled = enabled)) }
-                            },
+                            blueAccent = blueAccent,
                             onEdit = { editingTemplate = template },
                             onDelete = { deletingTemplate = template }
                         )
@@ -180,57 +350,110 @@ fun TemplatesScreen(
                 }
             }
         }
+    }
 
-        // Add Template FAB
-        FloatingActionButton(
-            onClick = { showAddDialog = true },
-            containerColor = fabBg,
-            contentColor = Color.White,
-            shape = CircleShape,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 16.dp, end = 16.dp)
-                .size(58.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "Add Template",
-                modifier = Modifier.size(28.dp)
-            )
-        }
+    // Import Mode Dialog (Replace All vs Add to Existing)
+    if (showImportModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportModeDialog = false },
+            containerColor = Color(0xFF282C35),
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Text(
+                    text = if (pendingIsExcel) "Import Excel Templates" else "Import CSV Templates",
+                    color = textPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "How would you like to import templates?",
+                        color = Color(0xFFD0D4E0),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Button(
+                        onClick = {
+                            pendingImportMode = ImportMode.REPLACE
+                            showImportModeDialog = false
+                            if (pendingIsExcel) excelPickerLauncher.launch("*/*")
+                            else csvPickerLauncher.launch("*/*")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF9CB7F5),
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Replace All (Delete old & import new)", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            pendingImportMode = ImportMode.ADD
+                            showImportModeDialog = false
+                            if (pendingIsExcel) excelPickerLauncher.launch("*/*")
+                            else csvPickerLauncher.launch("*/*")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF353B47),
+                            contentColor = Color(0xFF9CB7F5)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Add to Existing (Keep old & append)", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showImportModeDialog = false }) {
+                    Text("Cancel", color = Color(0xFFB0B5C0))
+                }
+            }
+        )
     }
 
     // Add / Edit Template Dialog
     if (showAddDialog || editingTemplate != null) {
         val templateToEdit = editingTemplate
+        val templateIndex = if (templateToEdit != null) {
+            if (templateToEdit.order > 0) templateToEdit.order else (templates.indexOf(templateToEdit) + 1)
+        } else {
+            templates.size + 1
+        }
         AddOrEditTemplateDialog(
             template = templateToEdit,
+            templateIndex = templateIndex,
             textPrimary = textPrimary,
-            goldAccent = goldAccent,
+            blueAccent = blueAccent,
             onDismiss = {
                 showAddDialog = false
                 editingTemplate = null
             },
-            onSave = { titleText, greetingText, messageText, isEnabled ->
+            onSave = { messageText ->
                 scope.launch {
                     if (templateToEdit != null) {
                         repository.updateTemplate(
                             templateToEdit.copy(
-                                title = titleText,
-                                greeting = greetingText,
-                                message = messageText,
-                                enabled = isEnabled
+                                message = messageText
                             )
                         )
                     } else {
                         val nextOrder = repository.getNextTemplateOrder()
                         val newTemplate = MessageTemplate(
                             id = UUID.randomUUID().toString(),
-                            title = titleText.ifBlank { "Template #$nextOrder" },
-                            greeting = greetingText,
+                            title = "id: $nextOrder",
+                            greeting = "",
                             message = messageText,
                             order = nextOrder,
-                            enabled = isEnabled
+                            enabled = true
                         )
                         repository.saveTemplate(newTemplate)
                     }
@@ -243,8 +466,10 @@ fun TemplatesScreen(
 
     // Delete Template Confirmation Dialog
     deletingTemplate?.let { template ->
+        val templateIndex = if (template.order > 0) template.order else (templates.indexOf(template) + 1)
         DeleteTemplateConfirmationDialog(
             template = template,
+            templateIndex = templateIndex,
             textPrimary = textPrimary,
             onDismiss = { deletingTemplate = null },
             onConfirmDelete = {
@@ -260,20 +485,20 @@ fun TemplatesScreen(
 @Composable
 private fun TemplateCard(
     template: MessageTemplate,
+    templateIndex: Int = 1,
     cardBg: Color,
     textPrimary: Color,
-    goldAccent: Color,
-    onToggleEnabled: (Boolean) -> Unit,
+    blueAccent: Color,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header Row: Icon, Title & Greeting, Status Pill + Turn ON/OFF Switch
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header Row: Number Badge (#1, #2), Message Content Box, Edit/Delete Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -285,91 +510,101 @@ private fun TemplateCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF3E3218)),
+                            .background(Color(0xFF1E2C4A))
+                            .border(1.dp, blueAccent.copy(alpha = 0.5f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.List,
-                            contentDescription = null,
-                            tint = goldAccent,
-                            modifier = Modifier.size(22.dp)
+                        Text(
+                            text = "#$templateIndex",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = blueAccent
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
-                    Column {
-                        Text(
-                            text = template.title.ifBlank { "Template #${template.order}" },
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (template.greeting.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (template.title.isNotBlank()) template.title else "id: $templateIndex",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Edit and Delete Buttons
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        onClick = onEdit,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E2C4A),
+                        border = BorderStroke(1.dp, Color(0xFF3A5285))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Template",
+                                tint = Color(0xFF9CB7F5),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Greeting: ${template.greeting}",
+                                text = "Edit",
+                                color = Color(0xFF9CB7F5),
                                 fontSize = 12.sp,
-                                color = goldAccent,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onDelete,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF3B1E22),
+                        border = BorderStroke(1.dp, Color(0xFF752B33))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Template",
+                                tint = Color(0xFFFF6B6B),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Delete",
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Right Side: Turn ON/OFF Switch with Active/Inactive badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Status Badge
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (template.enabled) Color(0xFF1E3A28) else Color(0xFF333842),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (template.enabled) Color(0xFF4CAF50).copy(alpha = 0.5f) else Color(0xFF666D7C)
-                        )
-                    ) {
-                        Text(
-                            text = if (template.enabled) "ACTIVE" else "OFF",
-                            color = if (template.enabled) Color(0xFF81C784) else Color(0xFFA0A5B5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-
-                    // Turn ON/OFF Switch (kept feature)
-                    Switch(
-                        checked = template.enabled,
-                        onCheckedChange = onToggleEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = goldAccent,
-                            uncheckedThumbColor = Color(0xFF888888),
-                            uncheckedTrackColor = Color(0xFF424242)
-                        )
-                    )
-                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Template Message Content Box with highlighted placeholders
+            // Template Message Content Box with highlighted {name} placeholder
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF1E2330))
-                    .border(1.dp, Color(0xFF333846), RoundedCornerShape(14.dp))
-                    .padding(14.dp)
+                    .border(1.dp, Color(0xFF333846), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
             ) {
                 val formattedMessage = remember(template.message) {
                     buildAnnotatedString {
@@ -385,7 +620,7 @@ private fun TemplateCard(
                             append(messageText.substring(startIndex, tagIndex))
                             withStyle(
                                 style = SpanStyle(
-                                    color = goldAccent,
+                                    color = blueAccent,
                                     fontWeight = FontWeight.Bold
                                 )
                             ) {
@@ -398,79 +633,10 @@ private fun TemplateCard(
 
                 Text(
                     text = formattedMessage,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = Color(0xFFE0E0E0),
-                    lineHeight = 20.sp
+                    lineHeight = 18.sp
                 )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            HorizontalDivider(color = Color(0xFF383D4A), thickness = 1.dp)
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Redesigned Edit and Delete Option Buttons UI
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Edit Option Button
-                Surface(
-                    onClick = onEdit,
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF1E2C4A),
-                    border = BorderStroke(1.dp, Color(0xFF3A5285))
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Edit Template",
-                            tint = Color(0xFF9CB7F5),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Edit",
-                            color = Color(0xFF9CB7F5),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // Delete Option Button
-                Surface(
-                    onClick = onDelete,
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF3B1E22),
-                    border = BorderStroke(1.dp, Color(0xFF752B33))
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Delete Template",
-                            tint = Color(0xFFFF6B6B),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Delete",
-                            color = Color(0xFFFF6B6B),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
             }
         }
     }
@@ -479,97 +645,61 @@ private fun TemplateCard(
 @Composable
 private fun AddOrEditTemplateDialog(
     template: MessageTemplate?,
+    templateIndex: Int,
     textPrimary: Color,
-    goldAccent: Color,
+    blueAccent: Color,
     onDismiss: () -> Unit,
-    onSave: (titleText: String, greetingText: String, messageText: String, isEnabled: Boolean) -> Unit
+    onSave: (messageText: String) -> Unit
 ) {
-    var titleText by remember { mutableStateOf(template?.title ?: "") }
-    var greetingText by remember { mutableStateOf(template?.greeting ?: "") }
     var messageText by remember { mutableStateOf(template?.message ?: "") }
-    var isEnabled by remember { mutableStateOf(template?.enabled ?: true) }
     var isSaving by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C35),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(22.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(CircleShape)
-                        .background(if (template != null) Color(0xFF1E2C4A) else Color(0xFF3E3218)),
+                        .background(if (template != null) Color(0xFF1E2C4A) else Color(0xFF1E2C4A)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (template != null) Icons.Default.Edit else Icons.Default.Add,
                         contentDescription = null,
-                        tint = if (template != null) Color(0xFF9CB7F5) else goldAccent,
-                        modifier = Modifier.size(20.dp)
+                        tint = if (template != null) Color(0xFF9CB7F5) else blueAccent,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = if (template != null) "Edit Template" else "Add Template",
+                    text = if (template != null) "Edit Template #$templateIndex" else "Add SMS Template",
                     color = textPrimary,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
+                    fontSize = 18.sp
                 )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                // Title Field
-                OutlinedTextField(
-                    value = titleText,
-                    onValueChange = { titleText = it },
-                    label = { Text("Template Title", color = Color(0xFFA0A5B5)) },
-                    placeholder = { Text("e.g., Follow Up Offer", color = Color(0xFF6C7280)) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = textPrimary,
-                        unfocusedTextColor = textPrimary,
-                        focusedBorderColor = Color(0xFF9CB7F5),
-                        unfocusedBorderColor = Color(0xFF424855)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Greeting Field
-                OutlinedTextField(
-                    value = greetingText,
-                    onValueChange = { greetingText = it },
-                    label = { Text("Greeting (e.g. Hello, Hi)", color = Color(0xFFA0A5B5)) },
-                    placeholder = { Text("e.g., Hello", color = Color(0xFF6C7280)) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = textPrimary,
-                        unfocusedTextColor = textPrimary,
-                        focusedBorderColor = Color(0xFF9CB7F5),
-                        unfocusedBorderColor = Color(0xFF424855)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Message Body Label
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Message Body",
+                    text = "SMS Message Content",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFFA0A5B5)
                 )
 
-                // Message Field
+                // Single Text Field for SMS Message Text
                 OutlinedTextField(
                     value = messageText,
                     onValueChange = { messageText = it },
-                    placeholder = { Text("Type your message here...", color = Color(0xFF6C7280)) },
-                    minLines = 3,
-                    shape = RoundedCornerShape(16.dp),
+                    placeholder = { Text("Type your SMS message text here...", color = Color(0xFF6C7280)) },
+                    minLines = 4,
+                    maxLines = 8,
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = textPrimary,
                         unfocusedTextColor = textPrimary,
@@ -579,75 +709,29 @@ private fun AddOrEditTemplateDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Instruction Note for {name} tag
-                val tagInstruction = remember {
-                    buildAnnotatedString {
-                        append("Note: Use ")
-                        withStyle(SpanStyle(color = goldAccent, fontWeight = FontWeight.Bold)) {
-                            append("{name}")
-                        }
-                        append(" tag to automatically insert client's name in SMS.")
-                    }
-                }
-                Text(
-                    text = tagInstruction,
-                    fontSize = 12.sp,
-                    color = Color(0xFF8E95A5),
-                    lineHeight = 16.sp
-                )
-
-                // Live Preview Card
-                if (messageText.isNotBlank() || greetingText.isNotBlank()) {
-                    val previewText = remember(greetingText, messageText) {
-                        if (greetingText.isNotBlank()) "$greetingText $messageText" else messageText
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF1E2330))
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            text = "PREVIEW",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = goldAccent
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = previewText,
-                            fontSize = 13.sp,
-                            color = Color(0xFFD0D4E0),
-                            lineHeight = 18.sp
-                        )
-                    }
-                }
-
-                // Enable Switch Row
-                Row(
+                // Small Note Box for {name} placeholder
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(Color(0xFF1E2330))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .border(1.dp, Color(0xFF333846), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
                 ) {
+                    val tagInstruction = remember {
+                        buildAnnotatedString {
+                            append("Tip: Use ")
+                            withStyle(SpanStyle(color = blueAccent, fontWeight = FontWeight.Bold)) {
+                                append("{name}")
+                            }
+                            append(" in your message to automatically insert the client's name.")
+                        }
+                    }
                     Text(
-                        text = "Enabled for Automation",
-                        color = textPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Switch(
-                        checked = isEnabled,
-                        onCheckedChange = { isEnabled = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF9CB7F5)
-                        )
+                        text = tagInstruction,
+                        fontSize = 12.sp,
+                        color = Color(0xFFB0B5C0),
+                        lineHeight = 16.sp
                     )
                 }
             }
@@ -657,11 +741,11 @@ private fun AddOrEditTemplateDialog(
                 onClick = {
                     if (messageText.isNotBlank() && !isSaving) {
                         isSaving = true
-                        onSave(titleText, greetingText, messageText, isEnabled)
+                        onSave(messageText)
                     }
                 },
                 enabled = messageText.isNotBlank() && !isSaving,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF9CB7F5),
                     contentColor = Color.Black
@@ -681,6 +765,7 @@ private fun AddOrEditTemplateDialog(
 @Composable
 private fun DeleteTemplateConfirmationDialog(
     template: MessageTemplate,
+    templateIndex: Int,
     textPrimary: Color,
     onDismiss: () -> Unit,
     onConfirmDelete: () -> Unit
@@ -688,12 +773,12 @@ private fun DeleteTemplateConfirmationDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C35),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(22.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF3B1E22)),
                     contentAlignment = Alignment.Center
@@ -702,90 +787,258 @@ private fun DeleteTemplateConfirmationDialog(
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
                         tint = Color(0xFFFF6B6B),
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Delete Template",
+                    text = "Delete Template #$templateIndex",
                     color = textPrimary,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
+                    fontSize = 18.sp
                 )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Are you sure you want to delete this template?",
+                    text = "Are you sure you want to delete SMS Template #$templateIndex?",
                     color = Color(0xFFD0D4E0),
                     fontSize = 14.sp
                 )
 
-                // Highlighted Template Info Box
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1E2330))
-                        .border(1.dp, Color(0xFF3B1E22), RoundedCornerShape(14.dp))
-                        .padding(12.dp)
-                ) {
-                    Column {
+                if (template.message.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E2330))
+                            .border(1.dp, Color(0xFF3B1E22), RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                    ) {
                         Text(
-                            text = template.title.ifBlank { "Template #${template.order}" },
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF6B6B),
-                            fontSize = 15.sp
+                            text = template.message,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 12.sp,
+                            color = Color(0xFFA0A5B5)
                         )
-                        if (template.message.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = template.message,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                fontSize = 12.sp,
-                                color = Color(0xFFA0A5B5)
-                            )
-                        }
                     }
                 }
-
-                Text(
-                    text = "This action cannot be undone.",
-                    color = Color(0xFF8E95A5),
-                    fontSize = 12.sp
-                )
             }
         },
         confirmButton = {
             Button(
                 onClick = onConfirmDelete,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFFE54B4B),
                     contentColor = Color.White
                 )
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Delete Template", fontWeight = FontWeight.Bold)
-                }
+                Text("Delete", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFF424855))
-            ) {
+            TextButton(onClick = onDismiss) {
                 Text("Cancel", color = Color.White)
             }
         }
     )
+}
+
+private fun parseTemplateFile(context: Context, uri: Uri, isExcel: Boolean): List<String> {
+    val contentResolver = context.contentResolver
+    if (isExcel) {
+        try {
+            val sharedStrings = mutableListOf<String>()
+            val sheetRows = mutableMapOf<Int, MutableMap<String, String>>()
+
+            contentResolver.openInputStream(uri)?.use { inputStream ->
+                val zipStream = ZipInputStream(inputStream)
+                var entry = zipStream.nextEntry
+
+                var sharedStringsXml: String? = null
+                var sheet1Xml: String? = null
+
+                while (entry != null) {
+                    if (entry.name == "xl/sharedStrings.xml") {
+                        sharedStringsXml = zipStream.readBytes().toString(Charsets.UTF_8)
+                    } else if (entry.name == "xl/worksheets/sheet1.xml" || (sheet1Xml == null && entry.name.startsWith("xl/worksheets/sheet"))) {
+                        sheet1Xml = zipStream.readBytes().toString(Charsets.UTF_8)
+                    }
+                    entry = zipStream.nextEntry
+                }
+
+                if (sharedStringsXml != null) {
+                    val regex = Regex("<t[^>]*>(.*?)</t>", RegexOption.DOT_MATCHES_ALL)
+                    regex.findAll(sharedStringsXml).forEach { match ->
+                        val text = match.groupValues[1]
+                            .replace("&lt;", "<")
+                            .replace("&gt;", ">")
+                            .replace("&amp;", "&")
+                            .trim()
+                        sharedStrings.add(text)
+                    }
+                }
+
+                if (sheet1Xml != null) {
+                    val cellRegex = Regex("""<c\s+r="([A-Z]+)(\d+)"(?:\s+t="([^"]+)")?[^>]*>(.*?)</c>""", RegexOption.DOT_MATCHES_ALL)
+                    cellRegex.findAll(sheet1Xml).forEach { match ->
+                        val col = match.groupValues[1]
+                        val rowNum = match.groupValues[2].toIntOrNull() ?: 0
+                        val type = match.groupValues[3]
+                        val inner = match.groupValues[4]
+
+                        var cellValue = ""
+                        if (type == "s") {
+                            val vMatch = Regex("<v>(.*?)</v>").find(inner)
+                            val idx = vMatch?.groupValues?.get(1)?.toIntOrNull()
+                            if (idx != null && idx in sharedStrings.indices) {
+                                cellValue = sharedStrings[idx]
+                            }
+                        } else if (type == "inlineStr") {
+                            val tMatch = Regex("<t[^>]*>(.*?)</t>").find(inner)
+                            cellValue = tMatch?.groupValues?.get(1) ?: ""
+                        } else {
+                            val vMatch = Regex("<v>(.*?)</v>").find(inner)
+                            cellValue = vMatch?.groupValues?.get(1) ?: ""
+                        }
+
+                        cellValue = cellValue.trim()
+                        if (cellValue.isNotEmpty()) {
+                            val rowMap = sheetRows.getOrPut(rowNum) { mutableMapOf() }
+                            rowMap[col] = cellValue
+                        }
+                    }
+                }
+            }
+
+            val templateMap = mutableMapOf<Int, String>()
+
+            fun extractNum(s: String): Int? {
+                return s.toIntOrNull() ?: s.toDoubleOrNull()?.toInt() ?: Regex("""^(\d+)""").find(s)?.groupValues?.get(1)?.toIntOrNull()
+            }
+
+            sheetRows.keys.sorted().forEach { rowNum ->
+                val rowMap = sheetRows[rowNum] ?: return@forEach
+
+                val valB = rowMap["B"]?.trim() ?: ""
+                val valC = rowMap["C"]?.trim() ?: ""
+                val valA = rowMap["A"]?.trim() ?: ""
+
+                var num: Int? = null
+                var msgText: String? = null
+
+                // Case 1: Col B has number or "1:sdvhdh", Col C has SMS Body (or Col B has both)
+                if (valB.isNotEmpty()) {
+                    val colonMatch = Regex("""^(\d+)[:.\-\s]\s*(.+)""", RegexOption.DOT_MATCHES_ALL).find(valB)
+                    if (colonMatch != null) {
+                        num = colonMatch.groupValues[1].toIntOrNull()
+                        val bodyInB = colonMatch.groupValues[2].trim()
+                        msgText = if (valC.isNotEmpty() && !valC.equals("message", ignoreCase = true) && !valC.equals("template", ignoreCase = true)) valC else bodyInB
+                    } else {
+                        val parsedNum = extractNum(valB)
+                        if (parsedNum != null) {
+                            num = parsedNum
+                            if (valC.isNotEmpty()) {
+                                msgText = valC
+                            }
+                        }
+                    }
+                }
+
+                // Case 2: Col A has number or "1:sdvhdh", Col B has SMS Body
+                if (num == null && valA.isNotEmpty()) {
+                    val colonMatch = Regex("""^(\d+)[:.\-\s]\s*(.+)""", RegexOption.DOT_MATCHES_ALL).find(valA)
+                    if (colonMatch != null) {
+                        num = colonMatch.groupValues[1].toIntOrNull()
+                        val bodyInA = colonMatch.groupValues[2].trim()
+                        msgText = if (valB.isNotEmpty() && !valB.equals("message", ignoreCase = true) && !valB.equals("template", ignoreCase = true)) valB else bodyInA
+                    } else {
+                        val parsedNum = extractNum(valA)
+                        if (parsedNum != null) {
+                            num = parsedNum
+                            if (valB.isNotEmpty()) {
+                                msgText = valB
+                            }
+                        }
+                    }
+                }
+
+                // Case 3: Any cell in the row matching "1: sdvhdh"
+                if (num == null) {
+                    rowMap.values.forEach { valStr ->
+                        val colonMatch = Regex("""^(\d+)[:.\-\s]\s*(.+)""", RegexOption.DOT_MATCHES_ALL).find(valStr.trim())
+                        if (colonMatch != null) {
+                            val parsedNum = colonMatch.groupValues[1].toIntOrNull()
+                            val body = colonMatch.groupValues[2].trim()
+                            if (parsedNum != null && body.isNotBlank()) {
+                                num = parsedNum
+                                msgText = body
+                            }
+                        }
+                    }
+                }
+
+                val headers = listOf("message", "template", "text", "id", "sms", "body")
+                if (num != null && !msgText.isNullOrBlank() && 
+                    headers.none { msgText.equals(it, ignoreCase = true) }) {
+                    templateMap[num] = msgText
+                }
+            }
+
+            if (templateMap.isNotEmpty()) {
+                return templateMap.keys.sorted().map { templateMap.getValue(it) }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Fallback for CSV / TXT / TSV lines or general format
+    val fallbackResults = mutableListOf<Pair<Int, String>>()
+    val linesList = mutableListOf<String>()
+
+    try {
+        contentResolver.openInputStream(uri)?.bufferedReader()?.useLines { lines ->
+            lines.forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotBlank()) {
+                    linesList.add(trimmed)
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    linesList.forEach { line ->
+        val parts = line.split(",", "\t", ";")
+        if (parts.size >= 2) {
+            val first = parts[0].trim().removeSurrounding("\"")
+            val second = parts[1].trim().removeSurrounding("\"")
+            val num = first.toIntOrNull() ?: Regex("""^(\d+)""").find(first)?.groupValues?.get(1)?.toIntOrNull()
+            if (num != null && second.isNotBlank() && !second.equals("message", ignoreCase = true)) {
+                fallbackResults.add(num to second)
+            }
+        } else {
+            val colonMatch = Regex("""^(\d+)[:.\-\s]\s*(.+)""", RegexOption.DOT_MATCHES_ALL).find(line)
+            if (colonMatch != null) {
+                val num = colonMatch.groupValues[1].toIntOrNull()
+                val body = colonMatch.groupValues[2].trim().removeSurrounding("\"")
+                if (num != null && body.isNotBlank()) {
+                    fallbackResults.add(num to body)
+                }
+            }
+        }
+    }
+
+    if (fallbackResults.isNotEmpty()) {
+        return fallbackResults.sortedBy { it.first }.map { it.second }
+    }
+
+    return linesList.filter { msg ->
+        !msg.equals("message", ignoreCase = true) && !msg.equals("template", ignoreCase = true) && !msg.equals("text", ignoreCase = true)
+    }
 }

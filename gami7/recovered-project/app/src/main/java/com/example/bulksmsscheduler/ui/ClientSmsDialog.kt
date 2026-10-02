@@ -136,9 +136,10 @@ fun ClientSmsDialog(
                             val formattedDateTime = try {
                                 val date = LocalDate.parse(item.schedule.scheduledDate)
                                 val dateStr = date.format(DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.US))
-                                "$dateStr, ${item.schedule.scheduledTime}"
+                                val timeStr = RecoveredStrings.formatTimeToAmPm(item.schedule.scheduledTime)
+                                "$dateStr, $timeStr"
                             } catch (_: Exception) {
-                                "${item.schedule.scheduledDate}, ${item.schedule.scheduledTime}"
+                                "${item.schedule.scheduledDate}, ${RecoveredStrings.formatTimeToAmPm(item.schedule.scheduledTime)}"
                             }
 
                             Card(

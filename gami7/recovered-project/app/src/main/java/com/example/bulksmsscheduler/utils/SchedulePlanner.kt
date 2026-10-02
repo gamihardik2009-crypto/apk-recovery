@@ -53,10 +53,10 @@ object SchedulePlanner {
         val initialCursor = startFromDateTime ?: LocalDateTime.of(startDate, startTime)
         val initialPointers = clients.associateBy({ it.id }, { rotationIndex })
         val planResult = generateMultiWeekPlan(
-            settings = settings.copy(smsPerWeek = 1),
+            settings = settings,
             startDate = initialCursor.toLocalDate(),
             startTime = initialCursor.toLocalTime(),
-            clients = clients.map { if (it.smsPerWeek >= 0) it.copy(smsPerWeek = 1) else it },
+            clients = clients,
             templates = templates,
             numberOfWeeks = 1,
             initialTemplatePointers = initialPointers,
@@ -100,8 +100,11 @@ object SchedulePlanner {
 
     /**
      * Generates the multi-week plan supporting per-client SMS frequencies.
-     * Each client progresses through the enabled templates in a continuous loop at their own speed.
-     * Message scheduling order in each week rounds through clients by SMS frequency.
+     * Each client progresses through enabled templates ONCE in sequential order (Template 1, Template 2, ...).
+     * Message scheduling order in each week rounds through clients by SMS frequency (round-robin).
+     *
+     * If [numberOfWeeks] <= 0, it automatically generates all weeks until all active clients have received
+     * all available enabled templates.
      */
     fun generateMultiWeekPlan(
         settings: AppSettings,
@@ -109,12 +112,13 @@ object SchedulePlanner {
         startTime: LocalTime = LocalTime.now(),
         clients: List<Client>,
         templates: List<MessageTemplate>,
-        numberOfWeeks: Int = 4,
+        numberOfWeeks: Int = -1,
         initialTemplatePointers: Map<String, Int> = emptyMap(),
     ): PlanResult {
         val enabledTemplates = templates.filter { it.enabled }.sortedBy { it.order }
         val userTargetGap = settings.timeGapMinutes.coerceAtLeast(1)
-        if (clients.isEmpty() || enabledTemplates.isEmpty()) {
+        val activeClients = clients.filter { it.active }
+        if (activeClients.isEmpty() || enabledTemplates.isEmpty()) {
             return PlanResult(
                 schedules = emptyList(),
                 warningMessage = null,
@@ -124,11 +128,12 @@ object SchedulePlanner {
             )
         }
 
+        val totalTemplates = enabledTemplates.size
         val globalSmsPerWeek = settings.smsPerWeek.coerceAtLeast(0)
         val (workStart, workEnd) = effectiveWorkWindow(settings)
 
         // Track each client's template index position continuously across weeks
-        val clientPointers = clients.associateBy(
+        val clientPointers = activeClients.associateBy(
             keySelector = { it.id },
             valueTransform = { client -> initialTemplatePointers[client.id] ?: 0 },
         ).toMutableMap()
@@ -139,18 +144,32 @@ object SchedulePlanner {
         var wasAnyWeekAdjusted = false
         var firstWeekWarning: String? = null
 
-        for (w in 0 until numberOfWeeks) {
+        var w = 0
+        while (true) {
+            if (numberOfWeeks > 0 && w >= numberOfWeeks) break
+
+            // Check if any active client still needs unsent templates
+            val clientsNeedingMessages = activeClients.filter { client ->
+                (clientPointers[client.id] ?: 0) < totalTemplates
+            }
+            if (clientsNeedingMessages.isEmpty()) break
+
             val weekStartDate = startDate.plusWeeks(w.toLong())
             val weekStartTime = if (w == 0) startTime else workStart
             val batchLabel = weekStartDate.format(WEEK_FORMAT)
             val endOfWeek = weekStartDate.plusDays(6)
 
-            val weekMessagesMax = clients.sumOf { client ->
-                val freq = if (client.smsPerWeek >= 0) client.smsPerWeek else globalSmsPerWeek
-                freq.toLong()
+            // Calculate how many messages each client will get this week
+            val clientWeeklyQuotas = activeClients.associate { client ->
+                val currentPtr = clientPointers[client.id] ?: 0
+                val remainingTemplates = maxOf(0, totalTemplates - currentPtr)
+                val targetFreq = if (client.smsPerWeek >= 0) client.smsPerWeek else globalSmsPerWeek
+                client.id to minOf(targetFreq, remainingTemplates)
             }
 
-            // Calculate remaining/available working minutes for this specific week (handling mid-week start)
+            val weekMessagesMax = clientWeeklyQuotas.values.sumOf { it.toLong() }
+            if (weekMessagesMax <= 0L) break
+
             val weekWorkingMinutes = calculateRemainingWorkingMinutes(
                 cursor = LocalDateTime.of(weekStartDate, weekStartTime),
                 endOfWeekDate = endOfWeek,
@@ -159,12 +178,7 @@ object SchedulePlanner {
                 skipSunday = settings.skipSunday
             )
 
-            val maxGapForWeek = if (weekMessagesMax > 0) {
-                (weekWorkingMinutes / weekMessagesMax).toInt().coerceAtLeast(1)
-            } else {
-                userTargetGap
-            }
-
+            val maxGapForWeek = (weekWorkingMinutes / weekMessagesMax).toInt().coerceAtLeast(1)
             val effectiveGap = minOf(userTargetGap, maxGapForWeek)
 
             if (userTargetGap > maxGapForWeek) {
@@ -180,71 +194,71 @@ object SchedulePlanner {
             }
 
             var cursor = LocalDateTime.of(weekStartDate, weekStartTime)
+            val maxFreqInWeek = clientWeeklyQuotas.values.maxOrNull() ?: 0
 
-            // Determine maximum frequency among all clients
-            val maxFreq = clients.maxOfOrNull { client ->
-                if (client.smsPerWeek >= 0) client.smsPerWeek else globalSmsPerWeek
-            } ?: 0
-
-            if (maxFreq > 0) {
-                // Round r goes from 1 up to maxFreq
-                for (r in 1..maxFreq) {
-                    clients.forEach { client ->
-                        val freq = if (client.smsPerWeek >= 0) client.smsPerWeek else globalSmsPerWeek
-                        if (freq >= r) {
+            if (maxFreqInWeek > 0) {
+                for (r in 1..maxFreqInWeek) {
+                    activeClients.forEachIndexed { clientIndex, client ->
+                        val quota = clientWeeklyQuotas[client.id] ?: 0
+                        if (quota >= r) {
                             val currentPointer = clientPointers.getOrDefault(client.id, 0)
-                            val template = enabledTemplates[currentPointer % enabledTemplates.size]
-                            clientPointers[client.id] = currentPointer + 1
+                            if (currentPointer < totalTemplates) {
+                                val templateIndex = (clientIndex + currentPointer) % totalTemplates
+                                val template = enabledTemplates[templateIndex]
+                                clientPointers[client.id] = currentPointer + 1
 
-                            var rolls = 0
-                            while (rolls < MAX_CURSOR_ROLLS) {
-                                rolls++
-                                if (settings.skipSunday && cursor.dayOfWeek == DayOfWeek.SUNDAY) {
-                                    cursor = cursor.plusDays(1).with(workStart)
-                                    continue
-                                }
-                                if (cursor.toLocalTime().isBefore(workStart)) {
-                                    cursor = cursor.with(workStart)
+                                var rolls = 0
+                                while (rolls < MAX_CURSOR_ROLLS) {
+                                    rolls++
+                                    if (settings.skipSunday && cursor.dayOfWeek == DayOfWeek.SUNDAY) {
+                                        cursor = cursor.plusDays(1).with(workStart)
+                                        continue
+                                    }
+                                    if (cursor.toLocalTime().isBefore(workStart)) {
+                                        cursor = cursor.with(workStart)
+                                        break
+                                    }
+                                    if (cursor.toLocalTime().isAfter(workEnd)) {
+                                        cursor = cursor.plusDays(1).with(workStart)
+                                        continue
+                                    }
                                     break
                                 }
-                                if (cursor.toLocalTime().isAfter(workEnd)) {
-                                    cursor = cursor.plusDays(1).with(workStart)
-                                    continue
-                                }
-                                break
+
+                                val baseBody =
+                                    if (template.greeting.isNotEmpty()) "${template.greeting} ${template.message}"
+                                    else template.message
+
+                                val message =
+                                    if (client.useNameInTemplate) {
+                                        baseBody.replace(NAME_PLACEHOLDER, client.name)
+                                    } else {
+                                        baseBody.replace(NAME_PLACEHOLDER, "").replace("  ", " ").trim()
+                                    }
+
+                                val formattedTime = String.format(Locale.US, "%02d:%02d", cursor.hour, cursor.minute)
+
+                                result += Schedule(
+                                    id = UUID.randomUUID().toString(),
+                                    clientId = client.id,
+                                    templateId = template.id,
+                                    scheduledDate = cursor.toLocalDate().toString(),
+                                    scheduledTime = formattedTime,
+                                    status = ScheduleStatus.PENDING,
+                                    retryCount = 0,
+                                    campaignId = null,
+                                    week = batchLabel,
+                                    message = message,
+                                )
+
+                                cursor = cursor.plusMinutes(effectiveGap.toLong())
                             }
-
-                            val baseBody =
-                                if (template.greeting.isNotEmpty()) "${template.greeting} ${template.message}"
-                                else template.message
-
-                            val message =
-                                if (client.useNameInTemplate) {
-                                    baseBody.replace(NAME_PLACEHOLDER, client.name)
-                                } else {
-                                    baseBody.replace(NAME_PLACEHOLDER, "").replace("  ", " ").trim()
-                                }
-
-                            val formattedTime = String.format(Locale.US, "%02d:%02d", cursor.hour, cursor.minute)
-
-                            result += Schedule(
-                                id = UUID.randomUUID().toString(),
-                                clientId = client.id,
-                                templateId = template.id,
-                                scheduledDate = cursor.toLocalDate().toString(),
-                                scheduledTime = formattedTime,
-                                status = ScheduleStatus.PENDING,
-                                retryCount = 0,
-                                campaignId = null,
-                                week = batchLabel,
-                                message = message,
-                            )
-
-                            cursor = cursor.plusMinutes(effectiveGap.toLong())
                         }
                     }
                 }
             }
+
+            w++
         }
 
         return PlanResult(
@@ -311,7 +325,8 @@ object SchedulePlanner {
         val result = ArrayList<Schedule>()
 
         for (i in 0 until missingCount) {
-            val template = enabledTemplates[currentPointer % enabledTemplates.size]
+            if (currentPointer >= enabledTemplates.size) break
+            val template = enabledTemplates[currentPointer]
             currentPointer++
 
             var rolls = 0

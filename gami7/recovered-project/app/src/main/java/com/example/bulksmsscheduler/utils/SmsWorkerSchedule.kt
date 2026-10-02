@@ -48,6 +48,21 @@ object SmsWorkerSchedule {
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
+
+        val contactRequest =
+            PeriodicWorkRequestBuilder<ContactSyncWorker>(
+                15,
+                TimeUnit.MINUTES,
+            )
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.MINUTES)
+                .addTag("ContactSyncWorker")
+                .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "ContactSyncWorker",
+            ExistingPeriodicWorkPolicy.UPDATE,
+            contactRequest,
+        )
     }
 
     /** Replaces the periodic worker (used when automation is switched on). */
@@ -88,6 +103,15 @@ object SmsWorkerSchedule {
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             SmsWorker.NEXT_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
+    fun runContactSync(context: Context) {
+        val request = OneTimeWorkRequestBuilder<ContactSyncWorker>().build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "ContactSyncOneTime",
             ExistingWorkPolicy.REPLACE,
             request,
         )

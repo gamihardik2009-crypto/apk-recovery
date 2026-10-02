@@ -17,8 +17,9 @@ import java.time.LocalTime
  * Locks down the timing rules of the updated planner:
  *  - Time Gap is automatically calculated from weekly working hours / total weekly SMS count.
  *  - Next working hours start date calculation logic.
- *  - "SMS Per Week" determines templates per week with rotation.
- *  - Every new batch/week starts on Monday of that week (for week > 0).
+ *  - "SMS Per Week" determines templates per week with round-robin interleaving.
+ *  - Each client receives enabled templates ONCE in order without circular wrapping.
+ *  - Planning stops when all active clients have received all available enabled templates.
  */
 class SchedulePlannerTest {
 
@@ -85,8 +86,6 @@ class SchedulePlannerTest {
 
     @Test
     fun `auto calculated time gap distributes messages evenly across week`() {
-        // 7 days * 540 minutes = 3780 total week minutes
-        // 756 total messages -> gap = 3780 / 756 = 5 minutes
         val (plan, _, planGap) = SchedulePlanner.generateMultiWeekPlan(
             settings = settings(smsPerWeek = 1),
             startDate = monday,
@@ -104,15 +103,15 @@ class SchedulePlannerTest {
     }
 
     @Test
-    fun `multi week plan rotates templates per week and starts on mondays`() {
-        // 1 client with 2 SMS per week over 7 working days (3780 min / 2 = 1890 min gap = +1d 7h 30m)
+    fun `multi week plan distributes templates once per client in order`() {
+        // 1 client with 2 SMS per week, 4 templates total -> stops after 2 weeks (4 templates)
         val (plan, _) = SchedulePlanner.generateMultiWeekPlan(
             settings = settings(gapMinutes = 1890, smsPerWeek = 2),
             startDate = monday,
             startTime = nineAm,
             clients = clients(1),
             templates = templates(4),
-            numberOfWeeks = 2
+            numberOfWeeks = -1
         )
 
         val clientSchedules = clientMessages(plan, "c1")
@@ -145,7 +144,7 @@ class SchedulePlannerTest {
     }
 
     @Test
-    fun `multi client rotation with different sms frequencies per week`() {
+    fun `multi client round robin interleaving with one-time template progression`() {
         val client1 = Client(id = "c1", name = "C1", phone = "101", orderIndex = 1, smsPerWeek = 3)
         val client2 = Client(id = "c2", name = "C2", phone = "102", orderIndex = 2, smsPerWeek = 1)
         val client3 = Client(id = "c3", name = "C3", phone = "103", orderIndex = 3, smsPerWeek = 2)
@@ -165,35 +164,37 @@ class SchedulePlannerTest {
         val week1Schedules = plan.filter { it.week == "21/09" }
         assertEquals(6, week1Schedules.size) // C1 (3) + C2 (1) + C3 (2) = 6
 
-        // Check Round-robin order within Week 1:
-        // Round 1: C1 (t1), C2 (t1), C3 (t1)
+        // Round-robin order within Week 1:
+        // Round 1: C1 (t1), C2 (t2), C3 (t3)
         assertEquals("c1" to "t1", week1Schedules[0].clientId to week1Schedules[0].templateId)
-        assertEquals("c2" to "t1", week1Schedules[1].clientId to week1Schedules[1].templateId)
-        assertEquals("c3" to "t1", week1Schedules[2].clientId to week1Schedules[2].templateId)
+        assertEquals("c2" to "t2", week1Schedules[1].clientId to week1Schedules[1].templateId)
+        assertEquals("c3" to "t3", week1Schedules[2].clientId to week1Schedules[2].templateId)
 
-        // Round 2: C1 (t2), C3 (t2)
+        // Round 2: C1 (t2), C3 (t4)
         assertEquals("c1" to "t2", week1Schedules[3].clientId to week1Schedules[3].templateId)
-        assertEquals("c3" to "t2", week1Schedules[4].clientId to week1Schedules[4].templateId)
+        assertEquals("c3" to "t4", week1Schedules[4].clientId to week1Schedules[4].templateId)
 
         // Round 3: C1 (t3)
         assertEquals("c1" to "t3", week1Schedules[5].clientId to week1Schedules[5].templateId)
 
         // Week 2 schedules (Monday 2026-09-28)
         val week2Schedules = plan.filter { it.week == "28/09" }
-        assertEquals(6, week2Schedules.size)
+        // Total = 2 + 1 + 2 = 5
+        assertEquals(5, week2Schedules.size)
 
-        // Check Round-robin order and continuous template rotation within Week 2:
-        // Round 1: C1 (t4), C2 (t2), C3 (t3)
+        // Round 1: C1 (t4), C2 (t3), C3 (t5)
         assertEquals("c1" to "t4", week2Schedules[0].clientId to week2Schedules[0].templateId)
-        assertEquals("c2" to "t2", week2Schedules[1].clientId to week2Schedules[1].templateId)
-        assertEquals("c3" to "t3", week2Schedules[2].clientId to week2Schedules[2].templateId)
+        assertEquals("c2" to "t3", week2Schedules[1].clientId to week2Schedules[1].templateId)
+        assertEquals("c3" to "t5", week2Schedules[2].clientId to week2Schedules[2].templateId)
 
-        // Round 2: C1 (t5), C3 (t4)
+        // Round 2: C1 (t5), C3 (t1)
         assertEquals("c1" to "t5", week2Schedules[3].clientId to week2Schedules[3].templateId)
-        assertEquals("c3" to "t4", week2Schedules[4].clientId to week2Schedules[4].templateId)
+        assertEquals("c3" to "t1", week2Schedules[4].clientId to week2Schedules[4].templateId)
 
-        // Round 3: C1 wraps around to t1!
-        assertEquals("c1" to "t1", week2Schedules[5].clientId to week2Schedules[5].templateId)
+        // C1 finished all 5 templates after Week 2!
+        val c1Total = plan.filter { it.clientId == "c1" }
+        assertEquals(5, c1Total.size)
+        assertEquals(listOf("t1", "t2", "t3", "t4", "t5"), c1Total.map { it.templateId })
     }
 
     @Test
@@ -210,22 +211,19 @@ class SchedulePlannerTest {
             startTime = nineAm,
             clients = listOf(client1),
             templates = tmpl,
-            numberOfWeeks = 1,
+            numberOfWeeks = -1,
             initialTemplatePointers = initialPointers
         )
 
         val schedules = plan.filter { it.clientId == "c1" }
         assertEquals(2, schedules.size)
-        // Client1 sent 1 previously, so current pointer is 1 => t2, then 2 => t3
+        // Client1 sent 1 previously, so resumes at pointer 1 => t2, then pointer 2 => t3
         assertEquals("t2", schedules[0].templateId)
         assertEquals("t3", schedules[1].templateId)
     }
 
     @Test
     fun `manual time gap respected when within max capacity limit`() {
-        // 7 days * 540 minutes = 3780 total week minutes
-        // 10 messages -> max gap = 378 minutes.
-        // User sets manual gap = 15 minutes.
         val planResult = SchedulePlanner.generateMultiWeekPlan(
             settings = settings(gapMinutes = 15, smsPerWeek = 1),
             startDate = monday,
@@ -243,9 +241,6 @@ class SchedulePlannerTest {
 
     @Test
     fun `manual time gap capped at week max gap when user input exceeds max gap`() {
-        // 7 days * 540 minutes = 3780 total week minutes
-        // 756 messages -> max gap = 5 minutes.
-        // User sets manual gap = 30 minutes (exceeds max gap of 5 mins).
         val planResult = SchedulePlanner.generateMultiWeekPlan(
             settings = settings(gapMinutes = 30, smsPerWeek = 1),
             startDate = monday,

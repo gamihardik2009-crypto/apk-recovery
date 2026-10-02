@@ -104,10 +104,9 @@ fun PlanScreen(
                 .sortedBy { it.second }
                 .filter { (_, startDate) -> !startDate.isBefore(today.minusDays(6)) }
                 .map { it.first }
-                .take(4)
                 .ifEmpty {
                     // Fallback if all keys were filtered out
-                    weekMap.keys.sorted().take(4)
+                    weekMap.keys.sorted()
                 }
         } else {
             val now = LocalDate.now()
@@ -401,25 +400,10 @@ private fun ScheduleCard(
         try {
             val date = LocalDate.parse(schedule.scheduledDate)
             val dateStr = date.format(DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.US))
-
-            val timeParts = schedule.scheduledTime.split(":")
-            val timeStr = if (timeParts.size == 2) {
-                val hour = timeParts[0].toIntOrNull() ?: 0
-                val minute = timeParts[1]
-                val amPm = if (hour >= 12) "PM" else "AM"
-                val hour12 = when {
-                    hour == 0 -> 12
-                    hour > 12 -> hour - 12
-                    else -> hour
-                }
-                String.format(Locale.US, "%02d:%s %s", hour12, minute, amPm)
-            } else {
-                schedule.scheduledTime
-            }
-
+            val timeStr = RecoveredStrings.formatTimeToAmPm(schedule.scheduledTime)
             "$dateStr, $timeStr"
         } catch (_: Exception) {
-            "${schedule.scheduledDate}, ${schedule.scheduledTime}"
+            "${schedule.scheduledDate}, ${RecoveredStrings.formatTimeToAmPm(schedule.scheduledTime)}"
         }
     }
 

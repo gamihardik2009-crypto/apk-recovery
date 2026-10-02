@@ -71,8 +71,12 @@ import com.example.bulksmsscheduler.model.AppSettings
 import com.example.bulksmsscheduler.model.Client
 import com.example.bulksmsscheduler.model.ClientPhones
 import com.example.bulksmsscheduler.model.ClientSource
+import com.example.bulksmsscheduler.model.MessageTemplate
+import com.example.bulksmsscheduler.model.Schedule
+import com.example.bulksmsscheduler.model.ScheduleStatus
 import com.example.bulksmsscheduler.model.ScheduleWithClient
 import com.example.bulksmsscheduler.repository.SmsRepository
+import com.example.bulksmsscheduler.utils.ContactSyncHelper
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -80,6 +84,8 @@ import java.util.UUID
 fun ClientsScreen(
     repository: SmsRepository,
     clients: List<Client>,
+    templates: List<MessageTemplate> = emptyList(),
+    schedules: List<Schedule> = emptyList(),
     settings: AppSettings? = null,
     cardBg: Color,
     textPrimary: Color,
@@ -87,6 +93,14 @@ fun ClientsScreen(
     onMessage: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+            scope.launch {
+                runCatching { ContactSyncHelper.syncContacts(context) }
+            }
+        }
+    }
     var searchQuery by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
@@ -99,6 +113,16 @@ fun ClientsScreen(
     val clientCardBg = Color(0xFF282C35)
     val avatarBg = Color(0xFF9CB7F5)
     val optionButtonBg = Color(0xFF353B47)
+
+    val enabledTemplateCount = remember(templates) {
+        templates.count { it.enabled }
+    }
+
+    val sentCountsByClient = remember(schedules) {
+        schedules.filter { it.status == ScheduleStatus.SENT }
+            .groupBy { it.clientId }
+            .mapValues { it.value.size }
+    }
 
     val filteredClients = remember(clients, searchQuery) {
         if (searchQuery.isBlank()) clients
@@ -321,8 +345,11 @@ fun ClientsScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredClients, key = { it.id }) { client ->
+                        val sentCount = sentCountsByClient[client.id] ?: 0
                         ClientItemCard(
                             client = client,
+                            sentCount = sentCount,
+                            totalTemplates = enabledTemplateCount,
                             settings = settings,
                             cardBg = clientCardBg,
                             avatarBg = avatarBg,
@@ -412,9 +439,10 @@ fun ClientsScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        val clientToDelete = client
+                        deletingClient = null
                         scope.launch {
-                            repository.deleteClient(client)
-                            deletingClient = null
+                            repository.deleteClient(clientToDelete)
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE54B4B))
@@ -440,9 +468,9 @@ fun ClientsScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        showDeleteAllDialog = false
                         scope.launch {
                             repository.deleteAllClients()
-                            showDeleteAllDialog = false
                             onMessage("All clients deleted")
                         }
                     },
@@ -460,10 +488,12 @@ fun ClientsScreen(
     }
 }
 
-/** Single Client Card showing name, phone, and clean green badge for SMS frequency in top right corner. Clicking opens dialog showing SMS schedule. */
+/** Single Client Card showing name, phone, completion status, and clean green badge for SMS frequency in top right corner. Clicking opens dialog showing SMS schedule. */
 @Composable
 private fun ClientItemCard(
     client: Client,
+    sentCount: Int = 0,
+    totalTemplates: Int = 0,
     settings: AppSettings?,
     cardBg: Color,
     avatarBg: Color,
@@ -479,6 +509,8 @@ private fun ClientItemCard(
 
     val defaultFreq = settings?.smsPerWeek ?: 1
     val freqDisplay = if (client.smsPerWeek >= 0) client.smsPerWeek.toString() else defaultFreq.toString()
+
+    val isCompleted = totalTemplates > 0 && sentCount >= totalTemplates
 
     Card(
         modifier = Modifier
@@ -528,11 +560,41 @@ private fun ClientItemCard(
                 }
             }
 
-            // Top Right Corner: SMS Per Week badge (Green) + Edit / Delete buttons
+            // Top Right Corner: Progress / Completed Badge + SMS Per Week badge (Green) + Edit / Delete buttons
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                if (isCompleted) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1B5E20))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Done",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF81C784)
+                        )
+                    }
+                } else if (totalTemplates > 0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF2E3B52))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "$sentCount/$totalTemplates",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9CB7F5)
+                        )
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))

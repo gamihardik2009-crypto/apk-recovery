@@ -233,6 +233,19 @@ interface ScheduleDao {
     )
     suspend fun getFailedSchedulesForWeek(monday: String, sunday: String): List<ScheduleWithClient>
 
+    @Transaction
+    @Suppress(RoomWarnings.QUERY_MISMATCH)
+    @RewriteQueriesToDropUnusedColumns
+    @Query(
+        """
+        SELECT * FROM schedules 
+        INNER JOIN clients ON schedules.clientId = clients.id
+        WHERE (status = 'FAILED' OR retryCount > 0) AND scheduledDate >= :monday AND scheduledDate <= :sunday
+        ORDER BY scheduledDate DESC, scheduledTime DESC
+    """,
+    )
+    suspend fun getFailedAndRescheduledSchedulesForWeek(monday: String, sunday: String): List<ScheduleWithClient>
+
     @Query("DELETE FROM schedules")
     suspend fun deleteAllSchedules()
 

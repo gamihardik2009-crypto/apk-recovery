@@ -1,5 +1,7 @@
 package com.example.bulksmsscheduler.ui
 
+import java.util.Locale
+
 /**
  * Hard-coded user-visible strings recovered from the original DEX string pool.
  *
@@ -93,4 +95,25 @@ object RecoveredStrings {
     const val SELECT_START_TIME = "Select Start Time"
     const val SENDING_INTERVAL = "Sending Interval"
     const val DUE = "Due"
+
+    fun formatTimeToAmPm(timeStr: String): String {
+        val trimmed = timeStr.trim()
+        if (trimmed.isEmpty()) return timeStr
+        if (trimmed.contains("AM", ignoreCase = true) || trimmed.contains("PM", ignoreCase = true)) {
+            return trimmed
+        }
+        val parts = trimmed.split(":")
+        if (parts.size >= 2) {
+            val hour = parts[0].toIntOrNull() ?: return trimmed
+            val minute = parts[1]
+            val amPm = if (hour >= 12) "PM" else "AM"
+            val hour12 = when {
+                hour == 0 -> 12
+                hour > 12 -> hour - 12
+                else -> hour
+            }
+            return String.format(Locale.US, "%02d:%s %s", hour12, minute, amPm)
+        }
+        return trimmed
+    }
 }

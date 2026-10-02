@@ -63,7 +63,8 @@ fun ManualEngineStartDialog(
         isTomorrow -> "Tomorrow"
         else -> nextWorkingDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
     }
-    val nextWorkingText = "Next Working Hours ($dayLabel at ${settings.workStartTime})"
+    val formattedStartTime = RecoveredStrings.formatTimeToAmPm(settings.workStartTime)
+    val nextWorkingText = "Next Working Hours ($dayLabel at $formattedStartTime)"
 
     val dialogBg = Color(0xFF1E2330)
     val cardBg = Color(0xFF282C35)

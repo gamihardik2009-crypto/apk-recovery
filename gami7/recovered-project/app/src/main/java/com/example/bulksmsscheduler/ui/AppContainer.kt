@@ -75,6 +75,7 @@ import com.example.bulksmsscheduler.SmsApplication
 import com.example.bulksmsscheduler.model.AppSettings
 import com.example.bulksmsscheduler.model.Client
 import com.example.bulksmsscheduler.model.HomeStatsData
+import com.example.bulksmsscheduler.model.Schedule
 import com.example.bulksmsscheduler.model.ScheduleStatus
 import com.example.bulksmsscheduler.model.ScheduleWithClient
 import com.example.bulksmsscheduler.utils.SchedulePlanner
@@ -82,6 +83,8 @@ import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -142,6 +145,23 @@ fun AppContainer(application: SmsApplication) {
     val templatesState by repository.templatesFlow.collectAsState(initial = emptyList())
     val schedulesState by repository.schedulesFlow.collectAsState(initial = emptyList())
     val recentActivityState by repository.recentActivityPastWeekFlow.collectAsState(initial = emptyList())
+
+    var lastSchedule by remember { mutableStateOf<Schedule?>(null) }
+    LaunchedEffect(schedulesState) {
+        lastSchedule = repository.getLastScheduled()
+    }
+
+    val lastScheduledDisplay = remember(lastSchedule) {
+        val schedule = lastSchedule ?: return@remember "No active plan"
+        try {
+            val date = LocalDate.parse(schedule.scheduledDate)
+            val formattedDate = date.format(DateTimeFormatter.ofPattern("dd-MM-yy", Locale.US))
+            val formattedTime = RecoveredStrings.formatTimeToAmPm(schedule.scheduledTime)
+            "$formattedDate at $formattedTime"
+        } catch (_: Exception) {
+            "${schedule.scheduledDate} ${schedule.scheduledTime}"
+        }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -209,6 +229,7 @@ fun AppContainer(application: SmsApplication) {
                     clientCount = clientsState.size,
                     clients = clientsState,
                     recentActivity = recentActivityState,
+                    schedules = schedulesState,
                     cardBg = cardBg,
                     engineCardBg = engineCardBg,
                     engineSubcardBg = engineSubcardBg,
@@ -258,7 +279,7 @@ fun AppContainer(application: SmsApplication) {
                     },
                     onShowFailedHistory = {
                         scope.launch {
-                            failedHistoryItems = repository.getCurrentWeekFailedSchedules()
+                            failedHistoryItems = repository.getCurrentWeekFailedAndRescheduledSchedules()
                             showFailedHistoryDialog = true
                         }
                     }
@@ -266,6 +287,8 @@ fun AppContainer(application: SmsApplication) {
                 1 -> ClientsScreen(
                     repository = repository,
                     clients = clientsState,
+                    templates = templatesState,
+                    schedules = schedulesState,
                     settings = settings,
                     cardBg = cardBg,
                     textPrimary = textPrimary,
@@ -279,7 +302,10 @@ fun AppContainer(application: SmsApplication) {
                     templates = templatesState,
                     cardBg = cardBg,
                     textPrimary = textPrimary,
-                    textSecondary = textSecondary
+                    textSecondary = textSecondary,
+                    onMessage = { message ->
+                        scope.launch { snackbarHostState.showSnackbar(message) }
+                    }
                 )
                 3 -> PlanScreen(
                     repository = repository,
@@ -396,6 +422,7 @@ private fun HomeScreen(
     clientCount: Int,
     clients: List<Client> = emptyList(),
     recentActivity: List<ScheduleWithClient>,
+    schedules: List<Schedule> = emptyList(),
     cardBg: Color,
     engineCardBg: Color,
     engineSubcardBg: Color,
@@ -414,6 +441,22 @@ private fun HomeScreen(
         sdf.format(Date())
     }
 
+    val lastSchedule = remember(schedules) {
+        schedules.maxByOrNull { it.scheduledDate + it.scheduledTime }
+    }
+
+    val lastScheduledDisplay = remember(lastSchedule) {
+        val schedule = lastSchedule ?: return@remember "No active plan"
+        try {
+            val date = LocalDate.parse(schedule.scheduledDate)
+            val formattedDate = date.format(DateTimeFormatter.ofPattern("dd-MM-yy", Locale.US))
+            val formattedTime = RecoveredStrings.formatTimeToAmPm(schedule.scheduledTime)
+            "$formattedDate at $formattedTime"
+        } catch (_: Exception) {
+            "${schedule.scheduledDate} ${schedule.scheduledTime}"
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -427,7 +470,7 @@ private fun HomeScreen(
         ) {
             Column {
                 Text(
-                    text = "Gami1",
+                    text = "Dashboard",
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
@@ -563,7 +606,7 @@ private fun HomeScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Working Hours", fontSize = 14.sp, color = Color(0xFFD0D0D0))
                             }
-                            Text("${settings.workStartTime} - ${settings.workEndTime}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = textPrimary)
+                            Text("${RecoveredStrings.formatTimeToAmPm(settings.workStartTime)} - ${RecoveredStrings.formatTimeToAmPm(settings.workEndTime)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = textPrimary)
                         }
 
                         // 2. Time Gap
@@ -732,6 +775,43 @@ private fun HomeScreen(
             )
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Last Scheduled SMS of Plan",
+                        fontSize = 13.sp,
+                        color = textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = lastScheduledDisplay,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = null,
+                    tint = Color(0xFF9CB7F5),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         // 4. Recent Activity Section (Last 1 Week)
@@ -788,7 +868,8 @@ private fun RecentActivityCard(
     val isSent = item.schedule.status == ScheduleStatus.SENT
     val statusColor = if (isSent) Color(0xFF81C784) else Color(0xFFE57373)
     val statusText = if (isSent) "SENT" else "FAILED"
-    val dateDisplay = "${item.schedule.scheduledDate} ${item.schedule.scheduledTime}"
+    val timeStr = RecoveredStrings.formatTimeToAmPm(item.schedule.scheduledTime)
+    val dateDisplay = "${item.schedule.scheduledDate} $timeStr"
     val clientName = item.client?.name ?: "Unknown Client"
     val clientPhone = item.client?.phone?.let { "($it)" } ?: ""
 
@@ -934,7 +1015,7 @@ private fun TurnOffEngineDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Are you sure you want to turn off automation? After restarting the engine, it will restart the schedule of sending SMS starting from client 1.",
+                    text = "Are you sure you want to turn off automation? When you turn it back on, it will resume right where it left off without resetting past progress.",
                     fontSize = 14.sp,
                     color = textSecondary,
                     lineHeight = 20.sp

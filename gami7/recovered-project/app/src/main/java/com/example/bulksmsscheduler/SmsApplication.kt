@@ -2,35 +2,44 @@ package com.example.bulksmsscheduler
 
 import android.app.Application
 import android.content.IntentFilter
+import android.database.ContentObserver
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.ContactsContract
 import com.example.bulksmsscheduler.data.AppDatabase
 import com.example.bulksmsscheduler.engine.SmsSender
 import com.example.bulksmsscheduler.repository.SmsRepository
-import com.example.bulksmsscheduler.utils.SchedulePlanner
+import com.example.bulksmsscheduler.utils.ContactSyncHelper
 import com.example.bulksmsscheduler.utils.SmsWorker
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * Recovered `SmsApplication`.
  *
- * RECOVERED structure:
  *  - three lazy singletons, all created from the database instance:
  *    `AppDatabase` -> `SmsRepository` -> `SmsSender` ("engine");
  *  - `onCreate()` builds the engine, registers the dynamic `SMS_SENT` receiver
- *    (`RECEIVER_NOT_EXPORTED` on API 33+) and then launches a coroutine that
- *    performs the start-up work.
+ *    (`RECEIVER_NOT_EXPORTED` on API 33+), removes any duplicate client rows
+ *    left behind by the old contact-sync bug, and arms the periodic workers so
+ *    automation resumes by itself after a reboot or fresh install.
  *
- * The original start-up coroutine (recovered) made sure the settings row exists
- * and that a periodic [SmsWorker] is armed, so that automation resumes by itself
- * after a reboot or a fresh install without the UI being opened first.
+ * Contact auto-adding is event-driven: a `ContentObserver` watches the device
+ * contacts and schedules a *debounced* sync, so the burst of change callbacks a
+ * single edit produces collapses into one safe, serialized sync.
  */
 class SmsApplication : Application() {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Pending debounced contact sync, cancelled and re-armed on every change. */
+    private var contactSyncJob: Job? = null
 
     val database: AppDatabase by lazy { AppDatabase.getInstance(this) }
 
@@ -56,6 +65,43 @@ class SmsApplication : Application() {
 
             // Arm the periodic sender so automation works without opening the UI.
             SmsWorkerSchedule.ensurePeriodicWork(this@SmsApplication)
+
+            // Repair any duplicates created before the sync was made atomic.
+            val removed = repository.removeDuplicateClients()
+            if (removed > 0) {
+                android.util.Log.i("SmsApplication", "Removed $removed duplicate client(s) on startup")
+            }
+
+            // Instantly sync contacts on startup (idempotent + serialized).
+            ContactSyncHelper.syncContacts(this@SmsApplication)
+        }
+
+        // Register ContentObserver for event-driven contact sync when contacts change.
+        try {
+            contentResolver.registerContentObserver(
+                ContactsContract.Contacts.CONTENT_URI,
+                true,
+                object : ContentObserver(Handler(Looper.getMainLooper())) {
+                    override fun onChange(selfChange: Boolean) {
+                        super.onChange(selfChange)
+                        scheduleContactSync()
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Debounces the `ContentObserver` callbacks: a single contact edit fires many
+     * `onChange` events, so we coalesce them into one sync shortly after the burst.
+     */
+    private fun scheduleContactSync() {
+        contactSyncJob?.cancel()
+        contactSyncJob = applicationScope.launch {
+            delay(CONTACT_SYNC_DEBOUNCE_MS)
+            ContactSyncHelper.syncContacts(this@SmsApplication)
         }
     }
 
@@ -63,6 +109,8 @@ class SmsApplication : Application() {
     suspend fun hasPendingWork(): Boolean = repository.getScheduleCount() > 0
 
     companion object {
+        private const val CONTACT_SYNC_DEBOUNCE_MS = 1_500L
+
         /** Exposed so UI code can reach the recovered services. */
         fun from(context: android.content.Context): SmsApplication =
             context.applicationContext as SmsApplication

@@ -82,6 +82,12 @@ class SmsWorker(
         val database = AppDatabase.getInstance(applicationContext)
         val repository = SmsRepository(database, applicationContext)
 
+        try {
+            ContactSyncHelper.syncContacts(applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Background contact sync failed", e)
+        }
+
         val settings = repository.getOrCreateSettings()
         if (!settings.automationEnabled) {
             Log.d(TAG, "Automation disabled")

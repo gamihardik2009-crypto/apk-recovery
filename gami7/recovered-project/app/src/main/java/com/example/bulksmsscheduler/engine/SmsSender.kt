@@ -114,8 +114,11 @@ class SmsSender(
             }
         } catch (error: Exception) {
             multiPartTrackers.remove(schedule.id)
-            // RECOVERED: an immediate exception marks the message failed.
-            repository.updateSchedule(schedule.copy(status = ScheduleStatus.FAILED))
+            val failed = schedule.copy(status = ScheduleStatus.FAILED)
+            repository.updateSchedule(failed)
+            if (failed.retryCount == 0) {
+                repository.rescheduleFailedMessageOnce(failed)
+            }
         }
     }
 
@@ -145,7 +148,11 @@ class SmsSender(
         multiPartTrackers.remove(scheduleId)
         val schedule = repository.getScheduleById(scheduleId) ?: return
         if (schedule.status != ScheduleStatus.FAILED) {
-            repository.updateSchedule(schedule.copy(status = ScheduleStatus.FAILED))
+            val failed = schedule.copy(status = ScheduleStatus.FAILED)
+            repository.updateSchedule(failed)
+            if (failed.retryCount == 0) {
+                repository.rescheduleFailedMessageOnce(failed)
+            }
         }
     }
 
