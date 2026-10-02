@@ -323,6 +323,10 @@ fun DashboardScreen(
         val hasCallLogPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
         val allPermissionsGranted = hasSmsPerm && hasPhonePerm && hasCallLogPerm
 
+        val permLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { _ -> }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -341,14 +345,19 @@ fun DashboardScreen(
                         Text("SMS and Call Forwarding require SMS, Phone State, and Call Log permissions to work.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE0E0E0))
                         Button(
                             onClick = {
-                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
+                                permLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.RECEIVE_SMS,
+                                        Manifest.permission.SEND_SMS,
+                                        Manifest.permission.READ_PHONE_STATE,
+                                        Manifest.permission.READ_CALL_LOG,
+                                        Manifest.permission.READ_CONTACTS
+                                    )
+                                )
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                         ) {
-                            Text("Grant Permissions in Settings", color = Color.White)
+                            Text("Grant Permissions Now", color = Color.White)
                         }
                     }
                 }

@@ -23,10 +23,10 @@ class SmsContentObserver(private val context: Context, handler: Handler) : Conte
 
         try {
             val cursor = context.contentResolver.query(
-                Telephony.Sms.Inbox.CONTENT_URI,
-                arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
-                null,
-                null,
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
+                "${Telephony.Sms.TYPE} = ?",
+                arrayOf("1"), // 1 = Inbox (Incoming SMS)
                 "${Telephony.Sms.DATE} DESC LIMIT 1"
             )
 
@@ -45,7 +45,7 @@ class SmsContentObserver(private val context: Context, handler: Handler) : Conte
                         val contactName = ContactHelper.getContactName(context, sender)
                         val forwardText = "SMS from $contactName $sender: $body"
 
-                        LogRepo.addLog("EVENT", "SMS detected via Observer from $sender")
+                        LogRepo.addLog("EVENT", "Incoming SMS detected via Observer from $sender")
                         val data = Data.Builder().putString("message", forwardText).build()
                         val workRequest = OneTimeWorkRequestBuilder<ForwardWorker>()
                             .setInputData(data)
