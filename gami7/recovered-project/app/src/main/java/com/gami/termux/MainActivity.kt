@@ -363,6 +363,26 @@ fun DashboardScreen(
                 }
             }
 
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF242A38)),
+                border = BorderStroke(1.dp, Color(0xFF3B4358))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🔔 Notification Access (Recommended)", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("For 100% reliable SMS & Call detection on modern Android, enable Notification Access.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF9E9E9E))
+                    Button(
+                        onClick = {
+                            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5C6bc0))
+                    ) {
+                        Text("Enable Notification Access", color = Color.White)
+                    }
+                }
+            }
+
             // Controls Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
