@@ -499,7 +499,7 @@ private fun HomeScreen(
         ) {
             Column {
                 Text(
-                    text = "Dashboard",
+                    text = "Gami",
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
