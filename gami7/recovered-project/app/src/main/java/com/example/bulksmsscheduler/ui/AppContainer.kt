@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Refresh
-import com.example.bulksmsscheduler.utils.GithubAutoUpdater
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -130,33 +129,10 @@ fun AppContainer(application: SmsApplication) {
     }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (!context.packageManager.canRequestPackageInstalls()) {
-                try {
-                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(intent)
-                } catch (_: Exception) {}
-            }
-        }
-
         if (!hasSendSmsPermission) {
             permissionLauncher.launch(Manifest.permission.SEND_SMS)
         } else {
             repository.processDueSchedules(application.smsSender)
-        }
-
-        scope.launch {
-            try {
-                val update = GithubAutoUpdater.checkForUpdate()
-                if (update != null) {
-                    snackbarHostState.showSnackbar("New version ${update.versionName} found! Downloading update...")
-                    GithubAutoUpdater.downloadAndInstall(context, update.apkUrl)
-                }
-            } catch (_: Exception) {
-                // Ignore network errors on startup
-            }
         }
     }
 
