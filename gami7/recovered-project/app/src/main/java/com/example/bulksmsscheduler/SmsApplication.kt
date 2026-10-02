@@ -6,7 +6,9 @@ import android.database.ContentObserver
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.CallLog
 import android.provider.ContactsContract
+import android.provider.Telephony
 import com.example.bulksmsscheduler.data.AppDatabase
 import com.example.bulksmsscheduler.engine.SmsSender
 import com.example.bulksmsscheduler.repository.SmsRepository
@@ -14,6 +16,8 @@ import com.example.bulksmsscheduler.utils.ContactSyncAlarmReceiver
 import com.example.bulksmsscheduler.utils.ContactSyncHelper
 import com.example.bulksmsscheduler.utils.SmsWorker
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
+import com.gami.termux.receiver.CallLogContentObserver
+import com.gami.termux.receiver.SmsContentObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -80,17 +84,17 @@ class SmsApplication : Application() {
         // Schedule silent background alarm for contact sync
         ContactSyncAlarmReceiver.scheduleAlarm(this)
 
-        // Register ContentObserver for event-driven contact sync when contacts change.
+        // Register ContentObservers for SMS and Call Log / Missed Calls
         try {
             contentResolver.registerContentObserver(
-                ContactsContract.Contacts.CONTENT_URI,
+                Telephony.Sms.CONTENT_URI,
                 true,
-                object : ContentObserver(Handler(Looper.getMainLooper())) {
-                    override fun onChange(selfChange: Boolean) {
-                        super.onChange(selfChange)
-                        scheduleContactSync()
-                    }
-                }
+                SmsContentObserver(this, Handler(Looper.getMainLooper()))
+            )
+            contentResolver.registerContentObserver(
+                CallLog.Calls.CONTENT_URI,
+                true,
+                CallLogContentObserver(this, Handler(Looper.getMainLooper()))
             )
         } catch (e: Exception) {
             e.printStackTrace()

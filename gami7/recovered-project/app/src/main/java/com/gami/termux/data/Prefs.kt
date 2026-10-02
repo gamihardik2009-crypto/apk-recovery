@@ -18,6 +18,14 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("sms_forwarding_enabled", false)
         set(value) = prefs.edit().putBoolean("sms_forwarding_enabled", value).apply()
 
+    var lastProcessedSmsId: Long
+        get() = prefs.getLong("last_sms_id", 0L)
+        set(value) = prefs.edit().putLong("last_sms_id", value).apply()
+
+    var lastProcessedCallId: Long
+        get() = prefs.getLong("last_call_id", 0L)
+        set(value) = prefs.edit().putLong("last_call_id", value).apply()
+
     companion object {
         @Volatile
         private var INSTANCE: Prefs? = null
