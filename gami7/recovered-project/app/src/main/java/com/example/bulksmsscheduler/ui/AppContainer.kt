@@ -105,6 +105,8 @@ fun AppContainer(application: SmsApplication) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var selectedTab by remember { mutableIntStateOf(0) }
+
     var hasSendSmsPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -124,6 +126,28 @@ fun AppContainer(application: SmsApplication) {
         if (!isGranted) {
             scope.launch {
                 snackbarHostState.showSnackbar("SMS permission is required to send messages")
+            }
+        }
+    }
+
+    val forwarderPermissions = arrayOf(
+        Manifest.permission.RECEIVE_SMS,
+        Manifest.permission.SEND_SMS,
+        Manifest.permission.READ_PHONE_STATE,
+        Manifest.permission.READ_CALL_LOG,
+        Manifest.permission.READ_CONTACTS
+    )
+    val forwarderPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 4) {
+            val missing = forwarderPermissions.any {
+                ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (missing) {
+                forwarderPermissionLauncher.launch(forwarderPermissions)
             }
         }
     }
@@ -170,7 +194,6 @@ fun AppContainer(application: SmsApplication) {
         }
     }
 
-    var selectedTab by remember { mutableIntStateOf(0) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showSimSwitchDialog by remember { mutableStateOf(false) }
     var showManualStartDialog by remember { mutableStateOf(false) }
