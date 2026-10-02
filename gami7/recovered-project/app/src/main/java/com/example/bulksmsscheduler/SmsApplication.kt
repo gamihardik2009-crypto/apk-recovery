@@ -10,6 +10,7 @@ import android.provider.ContactsContract
 import com.example.bulksmsscheduler.data.AppDatabase
 import com.example.bulksmsscheduler.engine.SmsSender
 import com.example.bulksmsscheduler.repository.SmsRepository
+import com.example.bulksmsscheduler.utils.ContactSyncAlarmReceiver
 import com.example.bulksmsscheduler.utils.ContactSyncHelper
 import com.example.bulksmsscheduler.utils.SmsWorker
 import com.example.bulksmsscheduler.utils.SmsWorkerSchedule
@@ -75,6 +76,9 @@ class SmsApplication : Application() {
             // Instantly sync contacts on startup (idempotent + serialized).
             ContactSyncHelper.syncContacts(this@SmsApplication)
         }
+
+        // Schedule silent background alarm for contact sync
+        ContactSyncAlarmReceiver.scheduleAlarm(this)
 
         // Register ContentObserver for event-driven contact sync when contacts change.
         try {
